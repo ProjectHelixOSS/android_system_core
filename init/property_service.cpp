@@ -504,6 +504,8 @@ bool CheckControlPropertyPerms(const std::string& name, const std::string& value
 
 static bool is_exempt(const std::string& name, const std::string& source_context) {
     static const std::vector<std::string> exemption_list = {
+        "persist.sys.helix_debug_enabled",
+        "logpersistd",
         "ro.boot.vbmeta.",
     };
 
@@ -536,7 +538,8 @@ uint32_t CheckPermissions(const std::string& name, const std::string& value,
     const char* type = nullptr;
     property_info_area->GetPropertyInfo(name.c_str(), &target_context, &type);
 
-    if (!is_exempt(name, source_context) && !CheckMacPerms(name, target_context, source_context.c_str(), cr)) {
+    if (!is_exempt(name, source_context) &&
+        !CheckMacPerms(name, target_context, source_context.c_str(), cr)) {
         *error = "SELinux permission check failed";
         return PROP_ERROR_PERMISSION_DENIED;
     }
@@ -1274,25 +1277,25 @@ void LoadDebugProperties() {
     uint32_t res;
 
     std::string debug_value = GetProperty(DEBUG_PROP, "1");
+    bool debug_enabled = debug_value == "1";
+    LOG(INFO) << DEBUG_PROP << " = " << debug_value;
 
-    if (debug_value == "1") {
-        const std::pair<const char*, const char*> debug_props[] = {
-            {"service.adb.root", "1"},
-            {"ro.adb.secure", "0"},
-            {"ro.debuggable", "1"},
-            {"ro.force.debuggable", "1"},
-            {"persist.sys.usb.config", "adb"},
-            {"sys.usb.config", "adb"}
-        };
+    const std::pair<const char*, const char*> debug_props[] = {
+        {"service.adb.root", debug_enabled ? "1" : "0"},
+        {"ro.adb.secure", debug_enabled ? "0" : "1"},
+        {"ro.debuggable", debug_enabled ? "1" : "0"},
+        {"ro.force.debuggable", debug_enabled ? "1" : "0"},
+        {"persist.sys.usb.config", debug_enabled ? "adb" : "none"},
+        {"sys.usb.config", debug_enabled ? "adb" : "none"}
+    };
 
-        for (const auto& [name, value] : debug_props) {
-            res = PropertySetNoSocket(name, value, &error);
-            if (res == PROP_SUCCESS) {
-                LOG(INFO) << "Debug property '" << name << "' set to '" << value << "'";
-            } else {
-                LOG(ERROR) << "Failed to set debug property '" << name
-                           << "' to '" << value << "': err=" << res << " (" << error << ")";
-            }
+    for (const auto& [name, value] : debug_props) {
+        res = PropertySetNoSocket(name, value, &error);
+        if (res == PROP_SUCCESS) {
+            LOG(INFO) << "Debug property '" << name << "' set to '" << value << "'";
+        } else {
+            LOG(ERROR) << "Failed to set debug property '" << name
+                       << "' to '" << value << "': err=" << res << " (" << error << ")";
         }
     }
 }
@@ -1688,9 +1691,13 @@ static void HandleInitSocket() {
                 update_sys_usb_config();
             }
 
-	    LoadDebugProperties();
+            weaken_prop_override_security = true;
 
-	    LoadVbMetaOverrides();
+            LoadDebugProperties();
+
+            LoadVbMetaOverrides();
+
+            weaken_prop_override_security = false;
 
             InitPropertySet("ro.persistent_properties.ready", "true");
             persistent_properties_loaded = true;
