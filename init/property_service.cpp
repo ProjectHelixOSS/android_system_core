@@ -1284,10 +1284,14 @@ void LoadDebugProperties() {
     LOG(INFO) << DEBUG_PROP << " = " << debug_value;
 
     const std::pair<const char*, const char*> debug_props[] = {
-        {"service.adb.root", debug_enabled ? "1" : "0"},
-        {"ro.adb.secure", debug_enabled ? "0" : "1"},
-        {"ro.debuggable", debug_enabled ? "1" : "0"},
-        {"ro.force.debuggable", debug_enabled ? "1" : "0"}
+        {"service.adb.root",        debug_enabled ? "1" : "0"},
+        {"ro.adb.secure",           debug_enabled ? "0" : "1"},
+        {"ro.debuggable",           debug_enabled ? "1" : "0"},
+        {"ro.force.debuggable",     debug_enabled ? "1" : "0"},
+        {"logd.logpersistd",        debug_enabled ? "logcatd" : ""},
+        {"logd.logpersistd.buffer", debug_enabled ? "all" : ""},
+        {"logd.logpersistd.size",   debug_enabled ? "20" : "0"},
+        {"ro.logd.size",            debug_enabled ? "16777216" : "262144"}
     };
 
     for (const auto& [name, value] : debug_props) {
@@ -1695,6 +1699,19 @@ static void HandleInitSocket() {
             weaken_prop_override_security = true;
 
             LoadDebugProperties();
+
+            // Bridge persist.sys.usb.config → sys.usb.config so the rc
+            // trigger "on property:sys.usb.config=adb" fires and starts adbd.
+            // The "on boot" rc trigger already fired before /data was mounted
+            // so we must do this manually when debug is active.
+            {
+                std::string helix_debug = GetProperty("persist.sys.helix_debug_enabled", "0");
+                if (helix_debug == "1") {
+                    std::string usb_err;
+                    PropertySetNoSocket("sys.usb.config", "adb", &usb_err);
+                    LOG(INFO) << "Helix debug: forced sys.usb.config=adb";
+                }
+            }
 
             LoadVbMetaOverrides();
 
